@@ -125,6 +125,14 @@ public class OllamaAnalysisEnricher {
                         : "Fixed loop syntax and implemented meaningful execution logic";
                     return new FixResult(explanation, enhanced, result.affectedFiles(), result.confidence(), result.errorsFound());
                 }
+
+                // Post-processing guard: replace infinite while loops (var += 1 when while var > 0)
+                String whileFixed = fixCode.replaceAll("(?m)^(\\s*)while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*>\\s*0\\s*:(.*?\\n\\1\\s+)\\2\\s*\\+=\\s*1\\b", "$1while $2 > 0:$3$2 -= 1");
+                if (!whileFixed.equals(fixCode)) {
+                    log.info("Corrected infinite while loop increment to decrement");
+                    String explanation = "Fixed logical error: corrected infinite loop by decrementing loop variable instead of incrementing.";
+                    return new FixResult(explanation, whileFixed, result.affectedFiles(), result.confidence(), result.errorsFound());
+                }
             }
         }
         return result;

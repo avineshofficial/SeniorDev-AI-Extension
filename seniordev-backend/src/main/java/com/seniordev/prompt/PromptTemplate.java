@@ -18,10 +18,11 @@ public class PromptTemplate {
         "DO NOT output markdown fences or conversational text.";
 
     public static final String WHOLE_FILE_FIX_SYSTEM_PROMPT =
-        "You are a Staff Principal Software Engineer and Code Fixer. " +
-        "Your task is to fix all syntax errors, typos, missing imports, incomplete logic, and compile errors in the file so it compiles cleanly with 0 errors.\n\n" +
+        "You are a Staff Principal Software Engineer, Senior Code Reviewer, and Logic Fixer. " +
+        "Your task is to fix all errors in the file, including both SYNTAX errors and CRITICAL LOGICAL ERRORS (such as infinite loops, wrong update directions, off-by-one errors, logic inversions, and unhandled edge cases).\n\n" +
         "CRITICAL RULES:\n" +
-        "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL CODE. Preserve the developer's original logic and structure.\n" +
+        "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL CODE. Preserve the developer's original intent.\n" +
+        "- RESOLVE LOGICAL BUGS: If a loop runs infinitely (e.g. `while a > 0:` with `a += 1` or `a++`), you MUST fix the logic so the loop terminates cleanly (e.g. `a -= 1` or `a--` or terminating bound).\n" +
         "- NEVER output lazy placeholder statements like `pass`, `// TODO`, `/* unimplemented */`, or empty dummy blocks. They have no meaning to a developer.\n" +
         "- THINK AHEAD: If a loop, condition, or block is empty or missing a body, think what the next line should be and fill it with meaningful working logic that uses the control variables (e.g., for `for i in range(1, a):`, execute meaningful work such as `print(i)`).\n" +
         "- Fix all typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`).\n" +
@@ -30,7 +31,7 @@ public class PromptTemplate {
         "- Ensure required imports are present (e.g., `import java.util.Scanner;`).\n" +
         "- Output the complete file source code from start to end.\n" +
         "- CRITICAL: `fixCode` must ONLY contain valid, executable source code in the target programming language. NEVER put conversational explanations, descriptions, or notes inside `fixCode`.\n" +
-        "- IF THE CODE IS ALREADY CORRECT OR HAS NO REAL ERRORS: output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'\n\n" +
+        "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'\n\n" +
         "Output strictly valid JSON with:\n" +
         "- `fixCode`: the complete, 100% correct file source code.\n" +
         "- `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed. Never list individual lines or variables.";
@@ -84,12 +85,14 @@ public class PromptTemplate {
         prompt.append("Language: ").append(language).append("\n");
         prompt.append("File Path: ").append(filePath).append("\n\n");
         if (issuesSummary != null && !issuesSummary.isEmpty()) {
-            prompt.append("Known issues to fix:\n").append(issuesSummary).append("\n\n");
+            prompt.append("Reported compiler/linter issues:\n").append(issuesSummary).append("\n\n");
+        } else {
+            prompt.append("Reported issues: None reported by basic linter, but check for CRITICAL LOGICAL ERRORS (such as infinite loops, wrong update direction, off-by-one errors).\n\n");
         }
         prompt.append("Current code:\n```\n").append(fileContent).append("\n```\n");
         prompt.append("\nINSTRUCTIONS:\n");
-        prompt.append("- Fix all syntax errors and complete any empty or missing logic.\n");
-        prompt.append("- Fill loops and blocks with real, meaningful logic using the loop variables (e.g. `print(i)`). NEVER write `pass` or empty dummy placeholders.\n");
+        prompt.append("- CAREFULLY DETECT LOGIC BUGS: check every loop condition and variable update. If an infinite loop exists (such as `while a > 0:` with `a += 1` instead of `a -= 1`), FIX IT so the loop terminates properly!\n");
+        prompt.append("- Fix any syntax errors, typos, and complete any missing logic with real executable code (never `pass` or empty dummy blocks).\n");
         return prompt.toString();
     }
 

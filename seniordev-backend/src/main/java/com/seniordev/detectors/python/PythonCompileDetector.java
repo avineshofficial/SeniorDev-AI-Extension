@@ -121,6 +121,9 @@ public class PythonCompileDetector implements IssueDetector {
                     issue.setMessage(msg);
 
                     issues.add(issue);
+                } else {
+                    // Check for logical bugs (such as infinite loops)
+                    checkLogicalErrors(pyFile, projectRoot, issues);
                 }
             } catch (Exception e) {
                 log.warn("Python compile check failed for {}: {}", pyFile, e.getMessage());
@@ -128,6 +131,82 @@ public class PythonCompileDetector implements IssueDetector {
         }
 
         return issues;
+    }
+
+    private void checkLogicalErrors(Path pyFile, Path projectRoot, List<Issue> issues) {
+        try {
+            List<String> lines = Files.readAllLines(pyFile);
+            Pattern whileGreater = Pattern.compile("^(\\s*)while\\s+([a-zA-Z_]\\w*)\\s*>\\s*([^:]+):");
+            Pattern whileLess = Pattern.compile("^(\\s*)while\\s+([a-zA-Z_]\\w*)\\s*<\\s*([^:]+):");
+
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                Matcher mG = whileGreater.matcher(line);
+                Matcher mL = whileLess.matcher(line);
+
+                if (mG.find()) {
+                    String indent = mG.group(1);
+                    String var = mG.group(2);
+                    boolean increments = false;
+                    for (int j = i + 1; j < lines.size(); j++) {
+                        String sub = lines.get(j);
+                        if (sub.isBlank()) continue;
+                        int subIndent = sub.indexOf(sub.trim());
+                        if (subIndent <= indent.length()) break;
+                        if (sub.matches(".*\\b" + var + "\\s*\\+=\\s*.*") ||
+                            sub.matches(".*\\b" + var + "\\s*=\\s*" + var + "\\s*\\+.*")) {
+                            increments = true;
+                            break;
+                        }
+                    }
+                    if (increments) {
+                        Issue issue = new Issue();
+                        issue.setLanguage("python");
+                        issue.setType(IssueType.LOGIC_ISSUE);
+                        issue.setSeverity(Severity.HIGH);
+                        issue.setLine(i + 1);
+                        try {
+                            issue.setFilePath(projectRoot.relativize(pyFile.toAbsolutePath()).toString());
+                        } catch (Exception e) {
+                            issue.setFilePath(pyFile.getFileName().toString());
+                        }
+                        issue.setMessage("Logical Error: Infinite loop detected. Variable '" + var + "' is incremented inside 'while " + var + " > ...', so the loop will never terminate.");
+                        issues.add(issue);
+                    }
+                } else if (mL.find()) {
+                    String indent = mL.group(1);
+                    String var = mL.group(2);
+                    boolean decrements = false;
+                    for (int j = i + 1; j < lines.size(); j++) {
+                        String sub = lines.get(j);
+                        if (sub.isBlank()) continue;
+                        int subIndent = sub.indexOf(sub.trim());
+                        if (subIndent <= indent.length()) break;
+                        if (sub.matches(".*\\b" + var + "\\s*-=\\s*.*") ||
+                            sub.matches(".*\\b" + var + "\\s*=\\s*" + var + "\\s*-.*")) {
+                            decrements = true;
+                            break;
+                        }
+                    }
+                    if (decrements) {
+                        Issue issue = new Issue();
+                        issue.setLanguage("python");
+                        issue.setType(IssueType.LOGIC_ISSUE);
+                        issue.setSeverity(Severity.HIGH);
+                        issue.setLine(i + 1);
+                        try {
+                            issue.setFilePath(projectRoot.relativize(pyFile.toAbsolutePath()).toString());
+                        } catch (Exception e) {
+                            issue.setFilePath(pyFile.getFileName().toString());
+                        }
+                        issue.setMessage("Logical Error: Infinite loop detected. Variable '" + var + "' is decremented inside 'while " + var + " < ...', so the loop will never terminate.");
+                        issues.add(issue);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Logical error check failed for {}: {}", pyFile, e.getMessage());
+        }
     }
 
     private String findPythonCmd() {
