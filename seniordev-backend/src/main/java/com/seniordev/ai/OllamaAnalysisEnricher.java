@@ -102,7 +102,62 @@ public class OllamaAnalysisEnricher {
             }
         }
         String prompt = PromptTemplate.buildWholeFileFixUserPrompt(language, filePath, fileContent, sb.toString());
-        return ollamaClient.generateWholeFileFix(PromptTemplate.WHOLE_FILE_FIX_SYSTEM_PROMPT, prompt);
+        FixResult result = ollamaClient.generateWholeFileFix(PromptTemplate.WHOLE_FILE_FIX_SYSTEM_PROMPT, prompt);
+
+        if (result != null) {
+            String fixCode = result.fixCode();
+            if (fixCode != null && isLikelyExplanation(fixCode, language)) {
+                log.info("AI returned explanation text in fixCode: '{}'. Preserving original file code.",
+                    fixCode.length() > 80 ? fixCode.substring(0, 80) + "..." : fixCode);
+                String explanation = (result.explanation() != null && !result.explanation().isBlank() && !result.explanation().equals(fixCode))
+                    ? result.explanation()
+                    : fixCode;
+                return new FixResult(explanation, fileContent, List.of(), "NONE", List.of());
+            }
+        }
+        return result;
+    }
+
+    public static boolean isLikelyExplanation(String text, String language) {
+        if (text == null || text.isBlank()) return true;
+        String trimmed = text.trim();
+        String lower = trimmed.toLowerCase();
+
+        // Common explanation starter phrases returned by LLMs
+        if (lower.startsWith("the code is") ||
+            lower.startsWith("this code is") ||
+            lower.startsWith("the provided code") ||
+            lower.startsWith("no changes") ||
+            lower.startsWith("already free of") ||
+            lower.startsWith("i have reviewed") ||
+            lower.startsWith("there are no") ||
+            lower.startsWith("all issues") ||
+            lower.startsWith("the only issue") ||
+            lower.startsWith("note:") ||
+            lower.contains("already free of syntax errors") ||
+            lower.contains("is not applicable in java") ||
+            lower.contains("no changes needed") ||
+            lower.contains("no changes are needed")) {
+            return true;
+        }
+
+        // Structural check: C-style languages (Java, etc.)
+        String lang = language != null ? language.toLowerCase() : "";
+        if ("java".equals(lang) || "c".equals(lang) || "cpp".equals(lang)) {
+            boolean hasBraces = trimmed.contains("{") && trimmed.contains("}");
+            boolean hasSemicolons = trimmed.contains(";");
+            boolean hasClassKeyword = trimmed.matches("(?s).*\\b(class|interface|enum|record|package|public|import)\\b.*");
+            if (!hasBraces && !hasSemicolons && !hasClassKeyword) {
+                return true; // Not valid Java code!
+            }
+        } else if ("python".equals(lang)) {
+            boolean hasPyConstructs = trimmed.matches("(?s).*\\b(def|class|import|from|for|while|if|return|print)\\b.*") || trimmed.contains("=");
+            if (!hasPyConstructs) {
+                return true; // Not valid Python code!
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -26,7 +26,9 @@ public class PromptTemplate {
         "- Fix all punctuation (e.g., colon `:` instead of semicolon `;`, missing brackets, unclosed strings).\n" +
         "- Fix all generic types (e.g., `ArrayList<Book>` instead of raw `ArrayList<>`).\n" +
         "- Ensure required imports are present (e.g., `import java.util.Scanner;`).\n" +
-        "- Output the complete file source code from start to end.\n\n" +
+        "- Output the complete file source code from start to end.\n" +
+        "- CRITICAL: `fixCode` must ONLY contain valid, executable source code in the target programming language. NEVER put conversational explanations, descriptions, or notes inside `fixCode`.\n" +
+        "- IF THE CODE IS ALREADY CORRECT OR HAS NO REAL ERRORS: output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'\n\n" +
         "Output strictly valid JSON with:\n" +
         "- `fixCode`: the complete, 100% correct file source code.\n" +
         "- `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed. Never list individual lines or variables.";

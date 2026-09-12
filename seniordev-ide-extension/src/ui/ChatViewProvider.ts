@@ -280,11 +280,54 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         throw new Error(explanation || 'AI failed to generate fix code.');
       }
 
-      // If AI says no changes needed, or fixedContent is not real code, skip file edit
-      const noChangeIndicators = ['no issues found', 'code is correct', 'no errors', 'already correct'];
-      const isNoChange = fixedContent.length < 20 ||
-        noChangeIndicators.some(s => fixedContent.toLowerCase().includes(s)) ||
-        fixedContent.trim() === currentContent.trim();
+      const isExplanation = (text: string): boolean => {
+        const lower = text.trim().toLowerCase();
+        const indicators = [
+          'the code is',
+          'this code is',
+          'already free of',
+          'free of syntax errors',
+          'no issues found',
+          'no errors found',
+          'no changes needed',
+          'no changes are needed',
+          'code is correct',
+          'already correct',
+          'not applicable in java',
+          'not applicable',
+          'does not need',
+          'there are no syntax',
+          'there are no errors',
+          'the provided code'
+        ];
+        return indicators.some(ind => lower.includes(ind));
+      };
+
+      const isRealCode = (text: string, lang: string): boolean => {
+        const trimmed = text.trim();
+        if (trimmed.length < 10) return false;
+        if (isExplanation(trimmed)) return false;
+
+        const l = (lang || '').toLowerCase();
+        if (l === 'java' || l === 'typescript' || l === 'javascript' || l === 'c' || l === 'cpp') {
+          const hasBraces = trimmed.includes('{') && trimmed.includes('}');
+          const hasSemicolon = trimmed.includes(';');
+          const hasKeywords = /\b(class|interface|record|enum|package|public|import|function|const|let|var)\b/.test(trimmed);
+          if (!hasBraces && !hasSemicolon && !hasKeywords) {
+            return false;
+          }
+        } else if (l === 'python') {
+          const hasPy = /\b(def|class|import|from|for|while|if|return|print)\b/.test(trimmed) || trimmed.includes('=');
+          if (!hasPy) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+      // If AI says no changes needed, or fixedContent is an explanation instead of real code, skip file edit
+      const isNoChange = fixedContent.trim() === currentContent.trim() ||
+        !isRealCode(fixedContent, this._state.language);
 
       if (isNoChange) {
         this._state.unifiedFix = {
