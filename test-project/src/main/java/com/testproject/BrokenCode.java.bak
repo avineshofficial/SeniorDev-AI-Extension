@@ -1,0 +1,17 @@
+package com.testproject;
+
+/**
+ * This file has an intentional compile error.
+ * The compile detector MUST catch this.
+ */
+public class BrokenCode {
+
+    public static void main(String[] args) {
+        // Intentional error: calling a method that does not exist
+        String result = nonExistentMethod("hello");
+        System.out.println(result);
+
+        // Another intentional error: type mismatch
+        int number = "this is not a number";
+    }
+}

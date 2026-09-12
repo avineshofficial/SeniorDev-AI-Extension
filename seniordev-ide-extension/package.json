@@ -1,0 +1,132 @@
+{
+  "name": "seniordev-ide-extension",
+  "displayName": "SeniorDev AI",
+  "description": "AI-powered Senior Developer Assistant for static analysis and whole-file auto-fixes",
+  "version": "0.3.0",
+  "publisher": "seniordev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "AI",
+    "Chat"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:seniordev.chatView",
+    "onCommand:seniordev.fixActiveFile",
+    "onCommand:seniordev.analyzeProject"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "seniordev.fixActiveFile",
+        "title": "SeniorDev AI: Fix Active File",
+        "category": "SeniorDev AI",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "seniordev.analyzeProject",
+        "title": "SeniorDev AI: Scan Entire Project",
+        "category": "SeniorDev AI",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "seniordev.generateFixReport",
+        "title": "SeniorDev AI: Copy AI Fix Prompt",
+        "category": "SeniorDev AI",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "seniordev.refresh",
+        "title": "SeniorDev AI: Refresh",
+        "category": "SeniorDev AI",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "seniordev.selectIssue",
+        "title": "SeniorDev AI: View Issue Details",
+        "category": "SeniorDev AI"
+      },
+      {
+        "command": "seniordev.showInlineDiff",
+        "title": "SeniorDev AI: Show Inline Diff",
+        "category": "SeniorDev AI",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "seniordev.enrichSelectedIssues",
+        "title": "SeniorDev AI: Get AI Fix for Selected",
+        "category": "SeniorDev AI",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "seniordev.verifySelectedIssues",
+        "title": "SeniorDev AI: Verify Selected Fixes",
+        "category": "SeniorDev AI",
+        "icon": "$(beaker)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "seniordev-sidebar",
+          "title": "SeniorDev AI",
+          "icon": "$(shield)"
+        }
+      ]
+    },
+    "views": {
+      "seniordev-sidebar": [
+        {
+          "type": "webview",
+          "id": "seniordev.chatView",
+          "name": "SeniorDev AI Assistant"
+        },
+        {
+          "id": "seniordev.issueTree",
+          "name": "Detected Issues (Advanced)",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SeniorDev AI",
+      "properties": {
+        "seniordev.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the SeniorDev AI backend server"
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "seniordev.enrichSelectedIssues",
+          "when": "view == seniordev.issueTree",
+          "group": "navigation"
+        },
+        {
+          "command": "seniordev.verifySelectedIssues",
+          "when": "view == seniordev.issueTree",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  }
+}
