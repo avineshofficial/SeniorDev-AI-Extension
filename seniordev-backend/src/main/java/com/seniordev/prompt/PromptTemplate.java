@@ -17,24 +17,45 @@ public class PromptTemplate {
         "If code is unstructured or missing functions, organize it into proper functions and clean logic. " +
         "DO NOT output markdown fences or conversational text.";
 
-    public static final String WHOLE_FILE_FIX_SYSTEM_PROMPT =
-        "You are a Staff Principal Software Engineer, Senior Code Reviewer, and Logic Fixer. " +
-        "Your task is to fix all errors in the file, including both SYNTAX errors and CRITICAL LOGICAL ERRORS (such as infinite loops, wrong update directions, off-by-one errors, logic inversions, and unhandled edge cases).\n\n" +
-        "CRITICAL RULES:\n" +
-        "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL CODE. Preserve the developer's original intent.\n" +
-        "- RESOLVE LOGICAL BUGS: If a loop runs infinitely (e.g. `while a > 0:` with `a += 1` or `a++`), you MUST fix the logic so the loop terminates cleanly (e.g. `a -= 1` or `a--` or terminating bound).\n" +
-        "- NEVER output lazy placeholder statements like `pass`, `// TODO`, `/* unimplemented */`, or empty dummy blocks. They have no meaning to a developer.\n" +
-        "- THINK AHEAD: If a loop, condition, or block is empty or missing a body, think what the next line should be and fill it with meaningful working logic that uses the control variables (e.g., for `for i in range(1, a):`, execute meaningful work such as `print(i)`).\n" +
-        "- Fix all typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`).\n" +
-        "- Fix all punctuation (e.g., colon `:` instead of semicolon `;`, missing brackets, unclosed strings).\n" +
-        "- Fix all generic types (e.g., `ArrayList<Book>` instead of raw `ArrayList<>`).\n" +
-        "- Ensure required imports are present (e.g., `import java.util.Scanner;`).\n" +
-        "- Output the complete file source code from start to end.\n" +
-        "- CRITICAL: `fixCode` must ONLY contain valid, executable source code in the target programming language. NEVER put conversational explanations, descriptions, or notes inside `fixCode`.\n" +
-        "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'\n\n" +
-        "Output strictly valid JSON with:\n" +
-        "- `fixCode`: the complete, 100% correct file source code.\n" +
-        "- `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed. Never list individual lines or variables.";
+    public static String getWholeFileFixSystemPrompt(String language) {
+        String lang = (language != null ? language : "").toLowerCase();
+        if (lang.contains("py")) {
+            return "You are a Staff Principal Python Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
+                   "Target Language: PYTHON (.py file).\n" +
+                   "CRITICAL REQUIREMENT: Output MUST BE 100% PURE, VALID PYTHON CODE.\n" +
+                   "NEVER output Java, C++, or any other programming language. NEVER use Java keywords like `public class`, `import java.util`, or semicolons `;`.\n\n" +
+                   "CRITICAL RULES:\n" +
+                   "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL PYTHON CODE. Preserve the developer's original intent.\n" +
+                   "- Fix undefined names (e.g., if `j` is used but `a` was initialized, correct `print(j)` to `print(a)`).\n" +
+                   "- RESOLVE LOGICAL BUGS: Ensure loops terminate properly (e.g., `while a > 0:` must decrement `a -= 1` so it doesn't run forever).\n" +
+                   "- NEVER output lazy placeholder statements like `pass`, `// TODO`, or empty blocks.\n" +
+                   "- Output strictly valid JSON with:\n" +
+                   "  - `fixCode`: the complete, 100% correct Python file source code.\n" +
+                   "  - `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed.\n" +
+                   "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'";
+        } else if (lang.contains("java")) {
+            return "You are a Staff Principal Java Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
+                   "Target Language: JAVA (.java file).\n" +
+                   "CRITICAL REQUIREMENT: Output MUST BE 100% PURE, VALID JAVA CODE.\n\n" +
+                   "CRITICAL RULES:\n" +
+                   "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL JAVA CODE. Preserve the developer's original class and structure.\n" +
+                   "- Fix all syntax errors, typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`), and missing imports (e.g., `import java.util.Scanner;`).\n" +
+                   "- RESOLVE LOGICAL BUGS: Ensure loops terminate properly (e.g., `while (a > 0)` with `a--`).\n" +
+                   "- NEVER output lazy placeholder statements or empty blocks.\n" +
+                   "- Output strictly valid JSON with:\n" +
+                   "  - `fixCode`: the complete, 100% correct Java file source code.\n" +
+                   "  - `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed.\n" +
+                   "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'";
+        } else {
+            return "You are a Staff Principal Software Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
+                   "Target Language: " + language + ".\n" +
+                   "CRITICAL: Output must be in " + language + " only. Never output code in a different programming language.\n" +
+                   "Fix all syntax and logical bugs.\n" +
+                   "Output strictly valid JSON with `fixCode` and `explanation`.";
+        }
+    }
+
+    public static final String WHOLE_FILE_FIX_SYSTEM_PROMPT = getWholeFileFixSystemPrompt("java");
 
     /**
      * System prompt for free-form developer Q&A chat.
@@ -82,17 +103,20 @@ public class PromptTemplate {
 
     public static String buildWholeFileFixUserPrompt(String language, String filePath, String fileContent, String issuesSummary) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Language: ").append(language).append("\n");
-        prompt.append("File Path: ").append(filePath).append("\n\n");
+        String langUpper = (language != null && !language.isBlank() ? language : "python").toUpperCase();
+        prompt.append("Target Language: ").append(langUpper).append(" (file: ").append(filePath).append(")\n\n");
+        prompt.append("CRITICAL: The output MUST be 100% ").append(langUpper).append(" code. DO NOT output code in any other language!\n\n");
         if (issuesSummary != null && !issuesSummary.isEmpty()) {
             prompt.append("Reported compiler/linter issues:\n").append(issuesSummary).append("\n\n");
         } else {
-            prompt.append("Reported issues: None reported by basic linter, but check for CRITICAL LOGICAL ERRORS (such as infinite loops, wrong update direction, off-by-one errors).\n\n");
+            prompt.append("Reported issues: None reported by basic linter, but check for CRITICAL LOGICAL ERRORS (such as infinite loops, undefined variables, wrong update direction, off-by-one errors).\n\n");
         }
         prompt.append("Current code:\n```\n").append(fileContent).append("\n```\n");
         prompt.append("\nINSTRUCTIONS:\n");
+        prompt.append("- Fix all syntax errors, typos, and undefined variable names.\n");
         prompt.append("- CAREFULLY DETECT LOGIC BUGS: check every loop condition and variable update. If an infinite loop exists (such as `while a > 0:` with `a += 1` instead of `a -= 1`), FIX IT so the loop terminates properly!\n");
-        prompt.append("- Fix any syntax errors, typos, and complete any missing logic with real executable code (never `pass` or empty dummy blocks).\n");
+        prompt.append("- NEVER write `pass` or empty dummy blocks.\n");
+        prompt.append("- The entire `fixCode` MUST be valid ").append(langUpper).append(" code.\n");
         return prompt.toString();
     }
 

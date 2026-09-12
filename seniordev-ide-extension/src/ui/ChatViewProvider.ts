@@ -118,13 +118,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (v) this._activeFilePath = v.document.uri.fsPath;
   }
 
+  private _resolveLanguage(fp: string): string {
+    if (!fp) return 'python';
+    const ext = path.extname(fp).toLowerCase();
+    switch (ext) {
+      case '.py':
+      case '.pyw':
+        return 'python';
+      case '.java':
+        return 'java';
+      case '.js':
+      case '.mjs':
+      case '.cjs':
+        return 'javascript';
+      case '.ts':
+      case '.tsx':
+        return 'typescript';
+      case '.cpp':
+      case '.cc':
+      case '.cxx':
+      case '.hpp':
+      case '.h':
+        return 'cpp';
+      case '.c':
+        return 'c';
+      case '.go':
+        return 'go';
+      case '.rs':
+        return 'rust';
+      case '.rb':
+        return 'ruby';
+      case '.php':
+        return 'php';
+      case '.cs':
+        return 'csharp';
+      case '.html':
+        return 'html';
+      case '.css':
+        return 'css';
+      case '.json':
+        return 'json';
+      default:
+        return ext.replace('.', '') || 'python';
+    }
+  }
+
   private _setActive(fp: string): void {
     if (!fp) return;
     const isNew = this._activeFilePath !== fp;
     this._activeFilePath = fp;
     this._state.activeFileName = path.basename(fp);
     this._state.activeFilePath = fp;
-    this._state.language = path.extname(fp).replace('.', '') || 'java';
+    this._state.language = this._resolveLanguage(fp);
     if (isNew) {
       this._state.unifiedFix = null;
       this._state.cards = [];
@@ -156,7 +201,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this._activeFilePath) {
       this._state.activeFileName = path.basename(this._activeFilePath);
       this._state.activeFilePath = this._activeFilePath;
-      this._state.language = path.extname(this._activeFilePath).replace('.', '') || 'java';
+      this._state.language = this._resolveLanguage(this._activeFilePath);
     }
     wv.webview.html = this._html();
     wv.webview.onDidReceiveMessage(async (msg) => {
@@ -316,7 +361,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           if (!hasBraces && !hasSemicolon && !hasKeywords) {
             return false;
           }
-        } else if (l === 'python') {
+        } else if (l === 'python' || l === 'py') {
           const hasPy = /\b(def|class|import|from|for|while|if|return|print)\b/.test(trimmed) || trimmed.includes('=');
           if (!hasPy) {
             return false;
@@ -324,6 +369,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         return true;
       };
+
+      // Guard against cross-language contamination
+      const isContaminated = (code: string, lang: string): boolean => {
+        const l = (lang || '').toLowerCase();
+        if (l === 'python' || l === 'py') {
+          if (code.includes('public class ') || code.includes('public static void main') ||
+              code.includes('import java.') || code.includes('System.out.') ||
+              code.includes('Scanner scanner') || (/;\s*(\r?\n|$)/.test(code) && code.includes('{'))) {
+            return true;
+          }
+        } else if (l === 'java') {
+          if (/\bdef\s+\w+\s*\(/.test(code) || /\belif\b/.test(code) || code.includes('import numpy')) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      if (isContaminated(fixedContent, this._state.language)) {
+        vscode.window.showErrorMessage(`SeniorDev AI: AI generated code in the wrong language for ${this._state.activeFileName}. Fix rejected to protect your file.`);
+        this._state.scanProgress = '';
+        this._push();
+        return;
+      }
 
       // If AI says no changes needed, or fixedContent is an explanation instead of real code, skip file edit
       const isNoChange = fixedContent.trim() === currentContent.trim() ||

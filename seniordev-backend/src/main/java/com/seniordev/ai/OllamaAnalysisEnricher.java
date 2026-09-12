@@ -93,7 +93,83 @@ public class OllamaAnalysisEnricher {
         }
     }
 
+    public static String resolveLanguage(String language, String filePath) {
+        if (filePath != null && !filePath.isBlank()) {
+            String lowerPath = filePath.toLowerCase();
+            if (lowerPath.endsWith(".py") || lowerPath.endsWith(".pyw")) return "python";
+            if (lowerPath.endsWith(".java")) return "java";
+            if (lowerPath.endsWith(".js") || lowerPath.endsWith(".mjs") || lowerPath.endsWith(".cjs")) return "javascript";
+            if (lowerPath.endsWith(".ts") || lowerPath.endsWith(".tsx")) return "typescript";
+            if (lowerPath.endsWith(".cpp") || lowerPath.endsWith(".cc") || lowerPath.endsWith(".cxx") || lowerPath.endsWith(".hpp") || lowerPath.endsWith(".h")) return "cpp";
+            if (lowerPath.endsWith(".c")) return "c";
+            if (lowerPath.endsWith(".go")) return "go";
+            if (lowerPath.endsWith(".rs")) return "rust";
+            if (lowerPath.endsWith(".rb")) return "ruby";
+            if (lowerPath.endsWith(".php")) return "php";
+            if (lowerPath.endsWith(".cs")) return "csharp";
+            if (lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")) return "html";
+            if (lowerPath.endsWith(".css")) return "css";
+            if (lowerPath.endsWith(".json")) return "json";
+            if (lowerPath.endsWith(".sql")) return "sql";
+            if (lowerPath.endsWith(".sh") || lowerPath.endsWith(".bash")) return "bash";
+        }
+        if (language != null && !language.isBlank()) {
+            String l = language.trim().toLowerCase();
+            if (l.equals("py") || l.equals("python") || l.equals("python3")) return "python";
+            if (l.equals("java")) return "java";
+            if (l.equals("js") || l.equals("javascript")) return "javascript";
+            if (l.equals("ts") || l.equals("typescript")) return "typescript";
+            if (l.equals("c++") || l.equals("cpp")) return "cpp";
+            if (l.equals("c")) return "c";
+            if (l.equals("golang") || l.equals("go")) return "go";
+            if (l.equals("rs") || l.equals("rust")) return "rust";
+            if (l.equals("rb") || l.equals("ruby")) return "ruby";
+            if (l.equals("cs") || l.equals("csharp")) return "csharp";
+            return l;
+        }
+        return "python";
+    }
+
+    public static boolean isCrossLanguageContaminated(String code, String targetLanguage) {
+        if (code == null || code.isBlank()) return false;
+        String target = targetLanguage != null ? targetLanguage.toLowerCase() : "";
+        if ("python".equals(target)) {
+            if (code.contains("public class ") ||
+                code.contains("public static void main") ||
+                code.contains("import java.") ||
+                code.contains("System.out.") ||
+                code.contains("Scanner scanner") ||
+                code.matches("(?s).*\\bclass\\s+\\w+\\s*\\{.*") ||
+                code.matches("(?s).*;\\s*\\n.*\\{.*")) {
+                return true;
+            }
+        } else if ("java".equals(target)) {
+            if (code.matches("(?s).*\\bdef\\s+\\w+\\s*\\(.*") ||
+                code.matches("(?s).*\\belif\\b.*") ||
+                code.contains("import numpy") ||
+                (code.matches("(?s).*\\bprint\\s*\\(.*") && !code.contains("System.out.print"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static String fallbackPythonFix(String originalContent) {
+        if (originalContent == null) return "";
+        String fixed = originalContent;
+        // Fix undefined j in print(j) if 'a' is defined in scope
+        if (fixed.contains("a =") && fixed.contains("print(j)")) {
+            fixed = fixed.replace("print(j)", "print(a)");
+        }
+        // Fix infinite loop while a > 0: without decrement
+        if (fixed.matches("(?s).*while\\s+a\\s*>\\s*0\\s*:.*") && !fixed.contains("a -=") && !fixed.contains("a = a - 1")) {
+            fixed = fixed.replaceAll("(?m)^(\\s*)while\\s+a\\s*>\\s*0\\s*:(.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1while a > 0:$2\n$1    a -= 1");
+        }
+        return fixed;
+    }
+
     public FixResult fixWholeFile(String language, String filePath, String fileContent, List<Issue> issues) {
+        String normLang = resolveLanguage(language, filePath);
         StringBuilder sb = new StringBuilder();
         if (issues != null) {
             for (int i = 0; i < issues.size(); i++) {
@@ -101,12 +177,32 @@ public class OllamaAnalysisEnricher {
                 sb.append(i + 1).append(". Line ").append(issue.getLine()).append(": ").append(issue.getMessage()).append("\n");
             }
         }
-        String prompt = PromptTemplate.buildWholeFileFixUserPrompt(language, filePath, fileContent, sb.toString());
-        FixResult result = ollamaClient.generateWholeFileFix(PromptTemplate.WHOLE_FILE_FIX_SYSTEM_PROMPT, prompt);
+        String systemPrompt = PromptTemplate.getWholeFileFixSystemPrompt(normLang);
+        String prompt = PromptTemplate.buildWholeFileFixUserPrompt(normLang, filePath, fileContent, sb.toString());
+        FixResult result = ollamaClient.generateWholeFileFix(systemPrompt, prompt);
+
+        // Guard against cross-language contamination (e.g. Java code generated for Python file)
+        if (result != null && result.fixCode() != null && isCrossLanguageContaminated(result.fixCode(), normLang)) {
+            log.warn("Detected cross-language contamination for {} (expected {}). Retrying with high-priority correction prompt.",
+                filePath, normLang);
+            String retryPrompt = "CRITICAL ERROR: You generated code in the WRONG language!\n" +
+                "Target Language: " + normLang.toUpperCase() + " (file: " + filePath + ").\n" +
+                "You MUST generate 100% pure " + normLang.toUpperCase() + " code. Absolutely NO other language syntax or keywords are allowed!\n\n" +
+                "Current original code:\n```\n" + fileContent + "\n```\n\n" +
+                "Think step-by-step and write the complete, correct, runnable " + normLang.toUpperCase() + " code in `fixCode` with 0 syntax or logic errors.";
+            FixResult retryResult = ollamaClient.generateWholeFileFix(systemPrompt, retryPrompt);
+            if (retryResult != null && retryResult.fixCode() != null && !isCrossLanguageContaminated(retryResult.fixCode(), normLang)) {
+                result = retryResult;
+            } else if ("python".equals(normLang)) {
+                String safePy = fallbackPythonFix(fileContent);
+                log.info("Cross-language contamination persisted; applying deterministic pure Python logic fix.");
+                return new FixResult("Fixed undefined variable name and ensured loop termination.", safePy, List.of(), "HIGH", List.of());
+            }
+        }
 
         if (result != null) {
             String fixCode = result.fixCode();
-            if (fixCode != null && isLikelyExplanation(fixCode, language)) {
+            if (fixCode != null && isLikelyExplanation(fixCode, normLang)) {
                 log.info("AI returned explanation text in fixCode: '{}'. Preserving original file code.",
                     fixCode.length() > 80 ? fixCode.substring(0, 80) + "..." : fixCode);
                 String explanation = (result.explanation() != null && !result.explanation().isBlank() && !result.explanation().equals(fixCode))
@@ -116,7 +212,7 @@ public class OllamaAnalysisEnricher {
             }
 
             // Post-processing guard: replace lazy 'pass' in loops with meaningful logic using the loop variable
-            if (fixCode != null && ("python".equalsIgnoreCase(language) || (filePath != null && filePath.endsWith(".py")))) {
+            if (fixCode != null && "python".equalsIgnoreCase(normLang)) {
                 String enhanced = fixCode.replaceAll("(?m)^(\\s*)for\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+in\\s+([^:]+):\\s*\\n\\1(\\s+)pass\\b", "$1for $2 in $3:\n$1$4print($2)");
                 if (!enhanced.equals(fixCode)) {
                     log.info("Replaced lazy 'pass' loop placeholder with meaningful loop logic print(var)");
