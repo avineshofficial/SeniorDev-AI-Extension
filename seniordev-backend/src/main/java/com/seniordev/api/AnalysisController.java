@@ -243,6 +243,16 @@ public class AnalysisController {
 
         log.info("=== Generating whole file AI fix for: {} ===", req.getFilePath());
 
+        if (!ollamaClient.isAvailable()) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new WholeFileFixResponse(
+                    "Ollama is not running. Please start Ollama ('ollama serve') in your terminal.",
+                    null,
+                    0,
+                    List.of()
+                ));
+        }
+
         FixResult fixResult = ollamaEnricher.fixWholeFile(
             req.getLanguage() != null ? req.getLanguage() : "auto",
             req.getFilePath(),
@@ -251,7 +261,13 @@ public class AnalysisController {
         );
 
         if (fixResult == null || fixResult.fixCode() == null || fixResult.fixCode().isEmpty()) {
-            return ResponseEntity.internalServerError().build();
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(new WholeFileFixResponse(
+                    "AI failed to generate a fix for this file. Please check Ollama logs.",
+                    null,
+                    0,
+                    List.of()
+                ));
         }
 
         WholeFileFixResponse response = new WholeFileFixResponse(

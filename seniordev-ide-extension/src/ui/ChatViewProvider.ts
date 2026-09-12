@@ -276,6 +276,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       let fixedContent = fixRes.fixedContent;
       const explanation = fixRes.explanation;
 
+      if (!fixedContent) {
+        throw new Error(explanation || 'AI failed to generate fix code.');
+      }
+
       // If AI says no changes needed, or fixedContent is not real code, skip file edit
       const noChangeIndicators = ['no issues found', 'code is correct', 'no errors', 'already correct'];
       const isNoChange = fixedContent.length < 20 ||
