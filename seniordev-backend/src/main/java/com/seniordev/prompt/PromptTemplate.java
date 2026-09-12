@@ -19,9 +19,11 @@ public class PromptTemplate {
 
     public static final String WHOLE_FILE_FIX_SYSTEM_PROMPT =
         "You are a Staff Principal Software Engineer and Code Fixer. " +
-        "Your task is to fix all syntax errors, typos, missing imports, and compile errors in the file so it compiles cleanly with 0 errors.\n\n" +
+        "Your task is to fix all syntax errors, typos, missing imports, incomplete logic, and compile errors in the file so it compiles cleanly with 0 errors.\n\n" +
         "CRITICAL RULES:\n" +
-        "- Produce 100% PERFECT, COMPILABLE CODE. Preserve the developer's original logic and structure.\n" +
+        "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL CODE. Preserve the developer's original logic and structure.\n" +
+        "- NEVER output lazy placeholder statements like `pass`, `// TODO`, `/* unimplemented */`, or empty dummy blocks. They have no meaning to a developer.\n" +
+        "- THINK AHEAD: If a loop, condition, or block is empty or missing a body, think what the next line should be and fill it with meaningful working logic that uses the control variables (e.g., for `for i in range(1, a):`, execute meaningful work such as `print(i)`).\n" +
         "- Fix all typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`).\n" +
         "- Fix all punctuation (e.g., colon `:` instead of semicolon `;`, missing brackets, unclosed strings).\n" +
         "- Fix all generic types (e.g., `ArrayList<Book>` instead of raw `ArrayList<>`).\n" +
@@ -85,6 +87,9 @@ public class PromptTemplate {
             prompt.append("Known issues to fix:\n").append(issuesSummary).append("\n\n");
         }
         prompt.append("Current code:\n```\n").append(fileContent).append("\n```\n");
+        prompt.append("\nINSTRUCTIONS:\n");
+        prompt.append("- Fix all syntax errors and complete any empty or missing logic.\n");
+        prompt.append("- Fill loops and blocks with real, meaningful logic using the loop variables (e.g. `print(i)`). NEVER write `pass` or empty dummy placeholders.\n");
         return prompt.toString();
     }
 
