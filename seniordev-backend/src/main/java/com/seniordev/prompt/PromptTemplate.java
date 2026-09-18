@@ -25,13 +25,17 @@ public class PromptTemplate {
                    "CRITICAL REQUIREMENT: Output MUST BE 100% PURE, VALID PYTHON CODE.\n" +
                    "NEVER output Java, C++, or any other programming language. NEVER use Java keywords like `public class`, `import java.util`, or semicolons `;`.\n\n" +
                    "CRITICAL RULES:\n" +
-                   "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL PYTHON CODE. Preserve the developer's original intent.\n" +
+                   "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL PYTHON CODE.\n" +
+                   "- PRESERVE USER INTENT & STRUCTURE: NEVER rewrite the user's initial variable values (e.g. keep `a = 1`) or loop condition (e.g. keep `while a < 10:`). DO NOT invert the user's logic or loop range!\n" +
+                   "- CORRECT LOOP STEP & DIRECTION:\n" +
+                   "  * When loop condition is `var < limit` (e.g. `while a < 10:`), the variable must INCREMENT (`a += 1`) to reach the limit. DO NOT flip the condition to `>` and DO NOT change the initial value!\n" +
+                   "  * When loop condition is `var > limit` (e.g. `while a > 0:`), the variable must DECREMENT (`a -= 1`) to reach the limit. DO NOT flip the condition to `<` and DO NOT change the initial value!\n" +
+                   "  * Fix the variable update statement (`+=` vs `-=`) inside the loop rather than rewriting the user's condition or initial variable values!\n" +
                    "- Fix undefined names (e.g., if `j` is used but `a` was initialized, correct `print(j)` to `print(a)`).\n" +
-                   "- RESOLVE LOGICAL BUGS: Ensure loops terminate properly (e.g., `while a > 0:` must decrement `a -= 1` so it doesn't run forever).\n" +
                    "- NEVER output lazy placeholder statements like `pass`, `// TODO`, or empty blocks.\n" +
                    "- Output strictly valid JSON with:\n" +
                    "  - `fixCode`: the complete, 100% correct Python file source code.\n" +
-                   "  - `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed.\n" +
+                   "  - `explanation`: exactly 1 short sentence summarizing what was fixed.\n" +
                    "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'";
         } else if (lang.contains("java")) {
             return "You are a Staff Principal Java Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
@@ -39,17 +43,21 @@ public class PromptTemplate {
                    "CRITICAL REQUIREMENT: Output MUST BE 100% PURE, VALID JAVA CODE.\n\n" +
                    "CRITICAL RULES:\n" +
                    "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL JAVA CODE. Preserve the developer's original class and structure.\n" +
+                   "- PRESERVE USER INTENT & STRUCTURE: NEVER change the user's initial variable values or loop condition. DO NOT invert the user's loop direction.\n" +
+                   "- CORRECT LOOP STEP & DIRECTION:\n" +
+                   "  * When loop condition is `var < limit` (e.g. `while (a < 10)`), the variable must INCREMENT (`a++` or `a += 1`) to reach the limit. DO NOT flip condition to `>`!\n" +
+                   "  * When loop condition is `var > limit` (e.g. `while (a > 0)`), the variable must DECREMENT (`a--` or `a -= 1`) to reach the limit. DO NOT flip condition to `<`!\n" +
                    "- Fix all syntax errors, typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`), and missing imports (e.g., `import java.util.Scanner;`).\n" +
-                   "- RESOLVE LOGICAL BUGS: Ensure loops terminate properly (e.g., `while (a > 0)` with `a--`).\n" +
                    "- NEVER output lazy placeholder statements or empty blocks.\n" +
                    "- Output strictly valid JSON with:\n" +
                    "  - `fixCode`: the complete, 100% correct Java file source code.\n" +
-                   "  - `explanation`: exactly 1 short sentence (under 15 words) summarizing what was fixed.\n" +
+                   "  - `explanation`: exactly 1 short sentence summarizing what was fixed.\n" +
                    "- IF THE CODE IS ALREADY 100% CORRECT (both syntax AND logic): output the EXACT original file code in `fixCode` unchanged, and set `explanation` to 'Code is already correct — no changes needed.'";
         } else {
             return "You are a Staff Principal Software Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
                    "Target Language: " + language + ".\n" +
                    "CRITICAL: Output must be in " + language + " only. Never output code in a different programming language.\n" +
+                   "Preserve developer intent: fix the variable update direction rather than rewriting the loop condition.\n" +
                    "Fix all syntax and logical bugs.\n" +
                    "Output strictly valid JSON with `fixCode` and `explanation`.";
         }
@@ -113,8 +121,9 @@ public class PromptTemplate {
         }
         prompt.append("Current code:\n```\n").append(fileContent).append("\n```\n");
         prompt.append("\nINSTRUCTIONS:\n");
+        prompt.append("- PRESERVE DEVELOPER INTENT: Keep the user's initial values (e.g. `a = 1`) and loop condition (e.g. `while a < 10:`). DO NOT rewrite the loop condition or change start values!\n");
+        prompt.append("- Fix the loop step direction inside the loop: if condition is `< limit`, increment (`a += 1`); if condition is `> limit`, decrement (`a -= 1`).\n");
         prompt.append("- Fix all syntax errors, typos, and undefined variable names.\n");
-        prompt.append("- CAREFULLY DETECT LOGIC BUGS: check every loop condition and variable update. If an infinite loop exists (such as `while a > 0:` with `a += 1` instead of `a -= 1`), FIX IT so the loop terminates properly!\n");
         prompt.append("- NEVER write `pass` or empty dummy blocks.\n");
         prompt.append("- The entire `fixCode` MUST be valid ").append(langUpper).append(" code.\n");
         return prompt.toString();

@@ -161,9 +161,17 @@ public class OllamaAnalysisEnricher {
         if (fixed.contains("a =") && fixed.contains("print(j)")) {
             fixed = fixed.replace("print(j)", "print(a)");
         }
-        // Fix infinite loop while a > 0: without decrement
-        if (fixed.matches("(?s).*while\\s+a\\s*>\\s*0\\s*:.*") && !fixed.contains("a -=") && !fixed.contains("a = a - 1")) {
-            fixed = fixed.replaceAll("(?m)^(\\s*)while\\s+a\\s*>\\s*0\\s*:(.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1while a > 0:$2\n$1    a -= 1");
+        // Fix while a < limit with a -= 1 -> a += 1
+        if (fixed.matches("(?s).*while\\s+a\\s*<=?\\s*\\d+\\s*:.*") && fixed.contains("a -=")) {
+            fixed = fixed.replace("a -=", "a +=");
+        }
+        // Fix infinite loop while a > 0: without decrement or with a += 1
+        if (fixed.matches("(?s).*while\\s+a\\s*>\\s*0\\s*:.*")) {
+            if (fixed.contains("a +=")) {
+                fixed = fixed.replace("a +=", "a -=");
+            } else if (!fixed.contains("a -=") && !fixed.contains("a = a - 1")) {
+                fixed = fixed.replaceAll("(?m)^(\\s*)while\\s+a\\s*>\\s*0\\s*:(.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1while a > 0:$2\n$1    a -= 1");
+            }
         }
         return fixed;
     }
@@ -222,12 +230,41 @@ public class OllamaAnalysisEnricher {
                     return new FixResult(explanation, enhanced, result.affectedFiles(), result.confidence(), result.errorsFound());
                 }
 
+                // Preserve user intent: if original had `while var < limit:` (e.g. while a < 10:)
+                if (fileContent != null && fileContent.matches("(?s).*while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<=?\\s*\\d+\\s*:.*")) {
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<=?\\s*(\\d+)").matcher(fileContent);
+                    if (m.find()) {
+                        String var = m.group(1);
+                        String limit = m.group(2);
+                        // If fixCode improperly inverted the condition to while var > or kept var -= 1
+                        if (fixCode.contains("while " + var + " >") || fixCode.contains(var + " -= 1") || fixCode.contains("while a > 0")) {
+                            log.info("Fixing inverted loop: restoring user's while {} < {} intent with {} += 1", var, limit, var);
+                            String restored = fileContent
+                                .replaceAll("(?m)^(\\s*)" + var + "\\s*-=\\s*1\\b", "$1" + var + " += 1")
+                                .replaceAll("(?m)^(\\s*)" + var + "\\s*=\\s*" + var + "\\s*-\\s*1\\b", "$1" + var + " = " + var + " + 1");
+                            if (!restored.contains(var + " += 1") && !restored.contains(var + " = " + var + " + 1")) {
+                                restored = restored.replaceAll("(?m)^(\\s*while\\s+" + var + "\\s*<.*?:.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1\n$1    " + var + " += 1");
+                            }
+                            String explanation = "Fixed loop logic: corrected update to `" + var + " += 1` to reach limit `" + limit + "` without altering user's while condition.";
+                            return new FixResult(explanation, restored, result.affectedFiles(), result.confidence(), result.errorsFound());
+                        }
+                    }
+                }
+
                 // Post-processing guard: replace infinite while loops (var += 1 when while var > 0)
                 String whileFixed = fixCode.replaceAll("(?m)^(\\s*)while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*>\\s*0\\s*:(.*?\\n\\1\\s+)\\2\\s*\\+=\\s*1\\b", "$1while $2 > 0:$3$2 -= 1");
                 if (!whileFixed.equals(fixCode)) {
                     log.info("Corrected infinite while loop increment to decrement");
                     String explanation = "Fixed logical error: corrected infinite loop by decrementing loop variable instead of incrementing.";
                     return new FixResult(explanation, whileFixed, result.affectedFiles(), result.confidence(), result.errorsFound());
+                }
+
+                // Post-processing guard: replace infinite while loops (var -= 1 when while var < limit)
+                String whileLtFixed = fixCode.replaceAll("(?m)^(\\s*while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<\\s*\\d+\\s*:.*?\\n\\1\\s+)\\2\\s*-=\\s*1\\b", "$1$2 += 1");
+                if (!whileLtFixed.equals(fixCode)) {
+                    log.info("Corrected infinite while loop decrement to increment");
+                    String explanation = "Fixed logical error: corrected infinite loop by incrementing loop variable instead of decrementing.";
+                    return new FixResult(explanation, whileLtFixed, result.affectedFiles(), result.confidence(), result.errorsFound());
                 }
             }
         }
