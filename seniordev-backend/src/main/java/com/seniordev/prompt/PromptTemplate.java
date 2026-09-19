@@ -26,11 +26,10 @@ public class PromptTemplate {
                    "NEVER output Java, C++, or any other programming language. NEVER use Java keywords like `public class`, `import java.util`, or semicolons `;`.\n\n" +
                    "CRITICAL RULES:\n" +
                    "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL PYTHON CODE.\n" +
-                   "- PRESERVE USER INTENT & STRUCTURE: NEVER rewrite the user's initial variable values (e.g. keep `a = 1`) or loop condition (e.g. keep `while a < 10:`). DO NOT invert the user's logic or loop range!\n" +
-                   "- CORRECT LOOP STEP & DIRECTION:\n" +
-                   "  * When loop condition is `var < limit` (e.g. `while a < 10:`), the variable must INCREMENT (`a += 1`) to reach the limit. DO NOT flip the condition to `>` and DO NOT change the initial value!\n" +
-                   "  * When loop condition is `var > limit` (e.g. `while a > 0:`), the variable must DECREMENT (`a -= 1`) to reach the limit. DO NOT flip the condition to `<` and DO NOT change the initial value!\n" +
-                   "  * Fix the variable update statement (`+=` vs `-=`) inside the loop rather than rewriting the user's condition or initial variable values!\n" +
+                   "- PRESERVE USER INTENT & PREVENT DEAD CODE / INFINITE LOOPS:\n" +
+                   "  * Compare `start` value vs `limit` in while loops:\n" +
+                   "    1) If `start > limit` (e.g. `a = 10`, limit `0`): The loop is counting DOWN. Condition MUST be `> limit` (e.g. `while a > 0:`). Step MUST decrement (`a -= 1`). If the code wrote `while a < 0:`, that condition is initially False (dead code) and will never run! Correct the condition to `while a > 0:`.\n" +
+                   "    2) If `start < limit` (e.g. `a = 1`, limit `10`): The loop is counting UP. Condition MUST be `< limit` (e.g. `while a < 10:`). Step MUST increment (`a += 1`).\n" +
                    "- Fix undefined names (e.g., if `j` is used but `a` was initialized, correct `print(j)` to `print(a)`).\n" +
                    "- NEVER output lazy placeholder statements like `pass`, `// TODO`, or empty blocks.\n" +
                    "- Output strictly valid JSON with:\n" +
@@ -43,10 +42,9 @@ public class PromptTemplate {
                    "CRITICAL REQUIREMENT: Output MUST BE 100% PURE, VALID JAVA CODE.\n\n" +
                    "CRITICAL RULES:\n" +
                    "- Produce 100% PERFECT, COMPILABLE, MEANINGFUL JAVA CODE. Preserve the developer's original class and structure.\n" +
-                   "- PRESERVE USER INTENT & STRUCTURE: NEVER change the user's initial variable values or loop condition. DO NOT invert the user's loop direction.\n" +
-                   "- CORRECT LOOP STEP & DIRECTION:\n" +
-                   "  * When loop condition is `var < limit` (e.g. `while (a < 10)`), the variable must INCREMENT (`a++` or `a += 1`) to reach the limit. DO NOT flip condition to `>`!\n" +
-                   "  * When loop condition is `var > limit` (e.g. `while (a > 0)`), the variable must DECREMENT (`a--` or `a -= 1`) to reach the limit. DO NOT flip condition to `<`!\n" +
+                   "- PRESERVE USER INTENT & PREVENT DEAD CODE / INFINITE LOOPS:\n" +
+                   "  * If `start > limit` (e.g. `a = 10`, limit `0`): Condition MUST be `>` (e.g. `while (a > 0)`). Step MUST decrement (`a--`). If code wrote `< 0`, correct it to `> 0`.\n" +
+                   "  * If `start < limit` (e.g. `a = 1`, limit `10`): Condition MUST be `<` (e.g. `while (a < 10)`). Step MUST increment (`a++`).\n" +
                    "- Fix all syntax errors, typos (e.g., `Scann` -> `Scanner`, `Arralist` -> `ArrayList`, `prntln` -> `println`), and missing imports (e.g., `import java.util.Scanner;`).\n" +
                    "- NEVER output lazy placeholder statements or empty blocks.\n" +
                    "- Output strictly valid JSON with:\n" +
@@ -57,7 +55,6 @@ public class PromptTemplate {
             return "You are a Staff Principal Software Engineer, Senior Code Reviewer, and Logic Fixer.\n" +
                    "Target Language: " + language + ".\n" +
                    "CRITICAL: Output must be in " + language + " only. Never output code in a different programming language.\n" +
-                   "Preserve developer intent: fix the variable update direction rather than rewriting the loop condition.\n" +
                    "Fix all syntax and logical bugs.\n" +
                    "Output strictly valid JSON with `fixCode` and `explanation`.";
         }
@@ -117,12 +114,12 @@ public class PromptTemplate {
         if (issuesSummary != null && !issuesSummary.isEmpty()) {
             prompt.append("Reported compiler/linter issues:\n").append(issuesSummary).append("\n\n");
         } else {
-            prompt.append("Reported issues: None reported by basic linter, but check for CRITICAL LOGICAL ERRORS (such as infinite loops, undefined variables, wrong update direction, off-by-one errors).\n\n");
+            prompt.append("Reported issues: Check for CRITICAL LOGICAL ERRORS (such as dead code conditions like `while a < 0` when `a = 10`, infinite loops, undefined variables, wrong update direction).\n\n");
         }
         prompt.append("Current code:\n```\n").append(fileContent).append("\n```\n");
         prompt.append("\nINSTRUCTIONS:\n");
-        prompt.append("- PRESERVE DEVELOPER INTENT: Keep the user's initial values (e.g. `a = 1`) and loop condition (e.g. `while a < 10:`). DO NOT rewrite the loop condition or change start values!\n");
-        prompt.append("- Fix the loop step direction inside the loop: if condition is `< limit`, increment (`a += 1`); if condition is `> limit`, decrement (`a -= 1`).\n");
+        prompt.append("- Analyze loop logic: ensure the condition is True at start (e.g., if `a = 10` and `a -= 1`, condition must be `while a > 0:`, NOT `while a < 0:` which never runs).\n");
+        prompt.append("- Ensure the loop progresses towards termination without infinite loops.\n");
         prompt.append("- Fix all syntax errors, typos, and undefined variable names.\n");
         prompt.append("- NEVER write `pass` or empty dummy blocks.\n");
         prompt.append("- The entire `fixCode` MUST be valid ").append(langUpper).append(" code.\n");

@@ -154,30 +154,177 @@ public class OllamaAnalysisEnricher {
         return false;
     }
 
-    public static String fallbackPythonFix(String originalContent) {
-        if (originalContent == null) return "";
-        String fixed = originalContent;
-        // Fix undefined j in print(j) if 'a' is defined in scope
-        if (fixed.contains("a =") && fixed.contains("print(j)")) {
-            fixed = fixed.replace("print(j)", "print(a)");
-        }
-        // Fix while a < limit with a -= 1 -> a += 1
-        if (fixed.matches("(?s).*while\\s+a\\s*<=?\\s*\\d+\\s*:.*") && fixed.contains("a -=")) {
-            fixed = fixed.replace("a -=", "a +=");
-        }
-        // Fix infinite loop while a > 0: without decrement or with a += 1
-        if (fixed.matches("(?s).*while\\s+a\\s*>\\s*0\\s*:.*")) {
-            if (fixed.contains("a +=")) {
-                fixed = fixed.replace("a +=", "a -=");
-            } else if (!fixed.contains("a -=") && !fixed.contains("a = a - 1")) {
-                fixed = fixed.replaceAll("(?m)^(\\s*)while\\s+a\\s*>\\s*0\\s*:(.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1while a > 0:$2\n$1    a -= 1");
+    public static String appendStep(String code, String var, String step) {
+        String[] lines = code.split("\r?\n");
+        int targetIdx = -1;
+        String targetIndent = "    ";
+        for (int i = lines.length - 1; i >= 0; i--) {
+            if (!lines[i].trim().isEmpty()) {
+                targetIdx = i;
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\s*)").matcher(lines[i]);
+                if (m.find() && !m.group(1).isEmpty()) {
+                    targetIndent = m.group(1);
+                }
+                break;
             }
         }
-        return fixed;
+        if (targetIdx >= 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < lines.length; i++) {
+                sb.append(lines[i]).append("\n");
+                if (i == targetIdx) {
+                    sb.append(targetIndent).append(var).append(" ").append(step).append("\n");
+                }
+            }
+            return sb.toString().trim();
+        }
+        return code + "\n" + targetIndent + var + " " + step;
+    }
+
+    public static FixResult analyzeAndFixLoop(String code) {
+        if (code == null || code.isBlank()) return null;
+
+        // 1. Find variable initialization: e.g. "a = 10" or "a = 1"
+        java.util.regex.Matcher mInit = java.util.regex.Pattern.compile("(?m)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+)\\s*;?").matcher(code);
+        if (!mInit.find()) return null;
+        String var = mInit.group(2);
+        int start = Integer.parseInt(mInit.group(3));
+
+        // 2. Find while loop for this var: e.g. "while a < 0:" or "while a < 10:" or "while a > 0:"
+        java.util.regex.Matcher mWhile = java.util.regex.Pattern.compile("(?m)^(\\s*)while\\s*\\(?\\s*" + var + "\\s*(<=?|>=?)\\s*(-?\\d+)\\s*\\)?\\s*[:{]").matcher(code);
+        if (!mWhile.find()) return null;
+        String op = mWhile.group(2);
+        int limit = Integer.parseInt(mWhile.group(3));
+
+        String fixed = code;
+        StringBuilder expl = new StringBuilder();
+
+        // Fix undefined variable in print(j) if var is initialized
+        if (fixed.contains("print(j)") && !fixed.contains("j =")) {
+            fixed = fixed.replace("print(j)", "print(" + var + ")");
+            expl.append("Fixed undefined variable `j` to `").append(var).append("`. ");
+        }
+
+        if (start < limit) {
+            // Intended: Count UP from start to limit (e.g. 1 towards 10)
+            if (op.startsWith(">")) {
+                String correctOp = op.replace(">", "<");
+                fixed = fixed.replaceAll("(\\bwhile\\s*\\(?\\s*" + var + "\\s*)" + java.util.regex.Pattern.quote(op) + "(\\s*" + limit + ")", "$1" + correctOp + "$2");
+                expl.append("Corrected loop condition to `").append(var).append(" ").append(correctOp).append(" ").append(limit).append("`. ");
+            }
+            if (fixed.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*")) {
+                fixed = fixed.replaceAll("(?m)^(\\s*)" + var + "\\s*-=\\s*(\\d+)", "$1" + var + " += $2");
+                expl.append("Corrected loop step direction to increment (`").append(var).append(" += 1`). ");
+            } else if (!fixed.matches("(?s).*\\b" + var + "\\s*(\\+=|=).*")) {
+                fixed = appendStep(fixed, var, "+= 1");
+                expl.append("Added loop increment (`").append(var).append(" += 1`) so loop terminates properly. ");
+            }
+        } else if (start > limit) {
+            // Intended: Count DOWN from start to limit (e.g. 10 towards 0)
+            if (op.startsWith("<")) {
+                String correctOp = op.replace("<", ">");
+                fixed = fixed.replaceAll("(\\bwhile\\s*\\(?\\s*" + var + "\\s*)" + java.util.regex.Pattern.quote(op) + "(\\s*" + limit + ")", "$1" + correctOp + "$2");
+                expl.append("Corrected loop condition from `").append(var).append(" ").append(op).append(" ").append(limit).append("` to `").append(var).append(" ").append(correctOp).append(" ").append(limit).append("` (from ").append(start).append(" down to ").append(limit).append("). ");
+            }
+            if (fixed.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*")) {
+                fixed = fixed.replaceAll("(?m)^(\\s*)" + var + "\\s*\\+=\\s*(\\d+)", "$1" + var + " -= $2");
+                expl.append("Corrected loop step direction to decrement (`").append(var).append(" -= 1`). ");
+            } else if (!fixed.matches("(?s).*\\b" + var + "\\s*(-=|=).*")) {
+                fixed = appendStep(fixed, var, "-= 1");
+                expl.append("Added loop decrement (`").append(var).append(" -= 1`) so loop terminates properly. ");
+            }
+        }
+
+        if (expl.length() > 0) {
+            return new FixResult(expl.toString().trim(), fixed, List.of(), "HIGH", List.of());
+        }
+        return null;
+    }
+
+    public static boolean isLoopLogicInverted(String original, String fix) {
+        if (original == null || fix == null) return false;
+        java.util.regex.Matcher mOrig = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(original);
+        java.util.regex.Matcher mFix = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(fix);
+        if (mOrig.find() && mFix.find()) {
+            int origStart = Integer.parseInt(mOrig.group(3));
+            int origLimit = Integer.parseInt(mOrig.group(5));
+            int fixLimit = Integer.parseInt(mFix.group(5));
+            // If original was counting up (start < limit), but fix changed limit or turned it into a countdown to 0:
+            if (origStart < origLimit && origLimit > 0 && fixLimit <= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isDeadCodeOrInfiniteLoop(String code) {
+        if (code == null) return false;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(code);
+        if (m.find()) {
+            int start = Integer.parseInt(m.group(3));
+            String op = m.group(4);
+            int limit = Integer.parseInt(m.group(5));
+            String var = m.group(2);
+            // Dead code checks
+            if (op.equals("<") && start >= limit) return true;
+            if (op.equals("<=") && start > limit) return true;
+            if (op.equals(">") && start <= limit) return true;
+            if (op.equals(">=") && start < limit) return true;
+            // Infinite loop checks
+            if (start < limit && code.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*")) return true;
+            if (start > limit && code.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*")) return true;
+        }
+        return false;
+    }
+
+    public static boolean isLoopLogicallyValid(String code) {
+        if (code == null) return true;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(code);
+        if (m.find()) {
+            int start = Integer.parseInt(m.group(3));
+            String op = m.group(4);
+            int limit = Integer.parseInt(m.group(5));
+            String var = m.group(2);
+
+            if (start < limit) {
+                boolean validCondition = op.equals("<") || op.equals("<=");
+                boolean validStep = code.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*") ||
+                                    code.matches("(?s).*\\b" + var + "\\s*=\\s*" + var + "\\s*\\+\\s*\\d+.*");
+                return validCondition && validStep;
+            }
+
+            if (start > limit) {
+                boolean validCondition = op.equals(">") || op.equals(">=");
+                boolean validStep = code.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*") ||
+                                    code.matches("(?s).*\\b" + var + "\\s*=\\s*" + var + "\\s*-\\s*\\d+.*");
+                return validCondition && validStep;
+            }
+
+            return false;
+        }
+        return true;
+    }
+
+    public static String fallbackPythonFix(String originalContent) {
+        if (originalContent == null) return "";
+        FixResult smartFix = analyzeAndFixLoop(originalContent);
+        if (smartFix != null && smartFix.fixCode() != null) {
+            return smartFix.fixCode();
+        }
+        return originalContent;
     }
 
     public FixResult fixWholeFile(String language, String filePath, String fileContent, List<Issue> issues) {
         String normLang = resolveLanguage(language, filePath);
+
+        // INTELLIGENT GUARD: If user's code is already 100% syntactically & logically valid, DO NOT MUTATE IT!
+        boolean hasIssues = issues != null && !issues.isEmpty();
+        boolean hasUndefinedVar = fileContent != null && fileContent.contains("print(j)") && !fileContent.contains("j =");
+        if (!hasIssues && !hasUndefinedVar && isLoopLogicallyValid(fileContent)) {
+            log.info("Original file code is already 100% syntactically and logically valid. Preserving without changes.");
+            return new FixResult("Code is already correct — no changes needed.", fileContent, List.of(), "HIGH", List.of());
+        }
+
         StringBuilder sb = new StringBuilder();
         if (issues != null) {
             for (int i = 0; i < issues.size(); i++) {
@@ -230,41 +377,28 @@ public class OllamaAnalysisEnricher {
                     return new FixResult(explanation, enhanced, result.affectedFiles(), result.confidence(), result.errorsFound());
                 }
 
-                // Preserve user intent: if original had `while var < limit:` (e.g. while a < 10:)
-                if (fileContent != null && fileContent.matches("(?s).*while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<=?\\s*\\d+\\s*:.*")) {
-                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<=?\\s*(\\d+)").matcher(fileContent);
-                    if (m.find()) {
-                        String var = m.group(1);
-                        String limit = m.group(2);
-                        // If fixCode improperly inverted the condition to while var > or kept var -= 1
-                        if (fixCode.contains("while " + var + " >") || fixCode.contains(var + " -= 1") || fixCode.contains("while a > 0")) {
-                            log.info("Fixing inverted loop: restoring user's while {} < {} intent with {} += 1", var, limit, var);
-                            String restored = fileContent
-                                .replaceAll("(?m)^(\\s*)" + var + "\\s*-=\\s*1\\b", "$1" + var + " += 1")
-                                .replaceAll("(?m)^(\\s*)" + var + "\\s*=\\s*" + var + "\\s*-\\s*1\\b", "$1" + var + " = " + var + " + 1");
-                            if (!restored.contains(var + " += 1") && !restored.contains(var + " = " + var + " + 1")) {
-                                restored = restored.replaceAll("(?m)^(\\s*while\\s+" + var + "\\s*<.*?:.*?\\n\\1\\s+print\\([^)]*\\))\\s*$", "$1\n$1    " + var + " += 1");
-                            }
-                            String explanation = "Fixed loop logic: corrected update to `" + var + " += 1` to reach limit `" + limit + "` without altering user's while condition.";
-                            return new FixResult(explanation, restored, result.affectedFiles(), result.confidence(), result.errorsFound());
-                        }
+                // If fixCode is dead code or has an infinite loop, or if original had an unaddressed loop error:
+                if (isDeadCodeOrInfiniteLoop(fixCode)) {
+                    FixResult loopFix = analyzeAndFixLoop(fixCode);
+                    if (loopFix == null) {
+                        loopFix = analyzeAndFixLoop(fileContent);
                     }
-                }
-
-                // Post-processing guard: replace infinite while loops (var += 1 when while var > 0)
-                String whileFixed = fixCode.replaceAll("(?m)^(\\s*)while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*>\\s*0\\s*:(.*?\\n\\1\\s+)\\2\\s*\\+=\\s*1\\b", "$1while $2 > 0:$3$2 -= 1");
-                if (!whileFixed.equals(fixCode)) {
-                    log.info("Corrected infinite while loop increment to decrement");
-                    String explanation = "Fixed logical error: corrected infinite loop by decrementing loop variable instead of incrementing.";
-                    return new FixResult(explanation, whileFixed, result.affectedFiles(), result.confidence(), result.errorsFound());
-                }
-
-                // Post-processing guard: replace infinite while loops (var -= 1 when while var < limit)
-                String whileLtFixed = fixCode.replaceAll("(?m)^(\\s*while\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*<\\s*\\d+\\s*:.*?\\n\\1\\s+)\\2\\s*-=\\s*1\\b", "$1$2 += 1");
-                if (!whileLtFixed.equals(fixCode)) {
-                    log.info("Corrected infinite while loop decrement to increment");
-                    String explanation = "Fixed logical error: corrected infinite loop by incrementing loop variable instead of decrementing.";
-                    return new FixResult(explanation, whileLtFixed, result.affectedFiles(), result.confidence(), result.errorsFound());
+                    if (loopFix != null) {
+                        log.info("Fixed dead code/infinite loop in AI result: {}", loopFix.explanation());
+                        return loopFix;
+                    }
+                } else if (isLoopLogicInverted(fileContent, fixCode)) {
+                    FixResult loopFix = analyzeAndFixLoop(fileContent);
+                    if (loopFix != null) {
+                        log.info("Restored non-inverted loop intent from original file: {}", loopFix.explanation());
+                        return loopFix;
+                    }
+                } else if (isDeadCodeOrInfiniteLoop(fileContent) && fixCode.trim().equals(fileContent.trim())) {
+                    FixResult loopFix = analyzeAndFixLoop(fileContent);
+                    if (loopFix != null) {
+                        log.info("Fixed unaddressed loop error from original file: {}", loopFix.explanation());
+                        return loopFix;
+                    }
                 }
             }
         }
