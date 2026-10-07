@@ -203,7 +203,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._state.activeFilePath = this._activeFilePath;
       this._state.language = this._resolveLanguage(this._activeFilePath);
     }
-    wv.webview.html = this._html();
+    let logoDataUri = '';
+    try {
+      const logoPath = path.join(this._extensionUri.fsPath, 'media', 'logo.jpg');
+      if (fs.existsSync(logoPath)) {
+        logoDataUri = 'data:image/jpeg;base64,' + fs.readFileSync(logoPath).toString('base64');
+      }
+    } catch {}
+    wv.webview.html = this._html(logoDataUri);
     wv.webview.onDidReceiveMessage(async (msg) => {
       try {
         switch (msg.action) {
@@ -843,7 +850,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /*  esbuild embeds them raw, breaking webview JS parsing.           */
   /* ================================================================ */
 
-  private _html(): string {
+  private _html(logoDataUri: string = ''): string {
     var cssLines = [
       ':root {',
       '  --bg: var(--vscode-sideBar-background, #181818);',
@@ -872,8 +879,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }',
       '.anim-container { padding: 18px 14px; display: flex; flex-direction: column; gap: 14px; font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); }',
       '.anim-header-row { display: flex; align-items: center; gap: 12px; margin-bottom: 2px; }',
-      '.anim-logo { width: 36px; height: 36px; border-radius: 50%; background: #E8EAF6; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }',
-      '.anim-logo svg { width: 36px; height: 36px; display: block; }',
+      '.anim-logo { width: 38px; height: 38px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.2); background: #1a1a1a; }',
+      '.anim-logo img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }',
       '.anim-header { font-size: 15px; font-weight: 600; color: var(--vscode-editor-foreground, #E0E0E0); line-height: 1.3; }',
       '.anim-steps { display: flex; flex-direction: column; gap: 13px; padding-left: 48px; }',
       '.anim-step { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--vscode-editor-foreground, #CCCCCC); }',
@@ -924,6 +931,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     var css = cssLines.join('\n');
 
     var jsLines = [
+      'var LOGO_DATA_URI = ' + JSON.stringify(logoDataUri) + ';',
       'var vscodeApi = acquireVsCodeApi();',
       'var elFileName = document.getElementById("elFileName");',
       'var elContent = document.getElementById("content");',
@@ -1042,7 +1050,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       '      var html = \'<div class="anim-container">\';',
       '      html += \'<div class="anim-header-row">\';',
       '      html += \'  <div class="anim-logo">\';',
-      '      html += \'    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="18" cy="18" r="17" fill="#E2E8F0"/><circle cx="17.5" cy="11" r="1.8" fill="#111827"/><path d="M 17.5 14.5 L 17.5 22 C 17.5 24.2 15.5 25.5 13.2 25.5 C 11.8 25.5 10.8 24.8 10.4 24.2" stroke="#111827" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M 25.5 7 Q 25.5 10.5 29 10.5 Q 25.5 10.5 25.5 14 Q 25.5 10.5 22 10.5 Q 25.5 10.5 25.5 7 Z" fill="#06B6D4"/><path d="M 28.5 15 Q 28.5 16.8 30.3 16.8 Q 28.5 16.8 28.5 18.5 Q 28.5 16.8 26.8 16.8 Q 28.5 16.8 28.5 15 Z" fill="#22D3EE"/></svg>\';',
+      '      html += \'    <img src="\' + LOGO_DATA_URI + \'\" alt="SeniorDev AI" />\';',
       '      html += \'  </div>\';',
       '      html += \'  <div class="anim-header">We\\\'re analyzing your content now ...</div>\';',
       '      html += \'</div>\';',
@@ -1170,7 +1178,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       '<html lang="en">',
       '<head>',
       '<meta charset="UTF-8">',
-      "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';\">",
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: https: vscode-resource:; style-src 'unsafe-inline'; script-src 'unsafe-inline';\">",
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
       '<title>SeniorDev AI</title>',
       '<style>' + css + '</style>',
