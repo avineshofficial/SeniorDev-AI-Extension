@@ -155,163 +155,35 @@ public class OllamaAnalysisEnricher {
     }
 
     public static String appendStep(String code, String var, String step) {
-        String[] lines = code.split("\r?\n");
-        int targetIdx = -1;
-        String targetIndent = "    ";
-        for (int i = lines.length - 1; i >= 0; i--) {
-            if (!lines[i].trim().isEmpty()) {
-                targetIdx = i;
-                java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\s*)").matcher(lines[i]);
-                if (m.find() && !m.group(1).isEmpty()) {
-                    targetIndent = m.group(1);
-                }
-                break;
-            }
-        }
-        if (targetIdx >= 0) {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < lines.length; i++) {
-                sb.append(lines[i]).append("\n");
-                if (i == targetIdx) {
-                    sb.append(targetIndent).append(var).append(" ").append(step).append("\n");
-                }
-            }
-            return sb.toString().trim();
-        }
-        return code + "\n" + targetIndent + var + " " + step;
+        return CodeLogicAnalyzer.appendStep(code, var, step);
+    }
+
+    public static String[] extractLoopInfo(String code) {
+        return CodeLogicAnalyzer.extractLoopInfo(code);
     }
 
     public static FixResult analyzeAndFixLoop(String code) {
-        if (code == null || code.isBlank()) return null;
-
-        // 1. Find variable initialization: e.g. "a = 10" or "a = 1"
-        java.util.regex.Matcher mInit = java.util.regex.Pattern.compile("(?m)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+)\\s*;?").matcher(code);
-        if (!mInit.find()) return null;
-        String var = mInit.group(2);
-        int start = Integer.parseInt(mInit.group(3));
-
-        // 2. Find while loop for this var: e.g. "while a < 0:" or "while a < 10:" or "while a > 0:"
-        java.util.regex.Matcher mWhile = java.util.regex.Pattern.compile("(?m)^(\\s*)while\\s*\\(?\\s*" + var + "\\s*(<=?|>=?)\\s*(-?\\d+)\\s*\\)?\\s*[:{]").matcher(code);
-        if (!mWhile.find()) return null;
-        String op = mWhile.group(2);
-        int limit = Integer.parseInt(mWhile.group(3));
-
-        String fixed = code;
-        StringBuilder expl = new StringBuilder();
-
-        // Fix undefined variable in print(j) if var is initialized
-        if (fixed.contains("print(j)") && !fixed.contains("j =")) {
-            fixed = fixed.replace("print(j)", "print(" + var + ")");
-            expl.append("Fixed undefined variable `j` to `").append(var).append("`. ");
-        }
-
-        if (start < limit) {
-            // Intended: Count UP from start to limit (e.g. 1 towards 10)
-            if (op.startsWith(">")) {
-                String correctOp = op.replace(">", "<");
-                fixed = fixed.replaceAll("(\\bwhile\\s*\\(?\\s*" + var + "\\s*)" + java.util.regex.Pattern.quote(op) + "(\\s*" + limit + ")", "$1" + correctOp + "$2");
-                expl.append("Corrected loop condition to `").append(var).append(" ").append(correctOp).append(" ").append(limit).append("`. ");
-            }
-            if (fixed.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*")) {
-                fixed = fixed.replaceAll("(?m)^(\\s*)" + var + "\\s*-=\\s*(\\d+)", "$1" + var + " += $2");
-                expl.append("Corrected loop step direction to increment (`").append(var).append(" += 1`). ");
-            } else if (!fixed.matches("(?s).*\\b" + var + "\\s*(\\+=|=).*")) {
-                fixed = appendStep(fixed, var, "+= 1");
-                expl.append("Added loop increment (`").append(var).append(" += 1`) so loop terminates properly. ");
-            }
-        } else if (start > limit) {
-            // Intended: Count DOWN from start to limit (e.g. 10 towards 0)
-            if (op.startsWith("<")) {
-                String correctOp = op.replace("<", ">");
-                fixed = fixed.replaceAll("(\\bwhile\\s*\\(?\\s*" + var + "\\s*)" + java.util.regex.Pattern.quote(op) + "(\\s*" + limit + ")", "$1" + correctOp + "$2");
-                expl.append("Corrected loop condition from `").append(var).append(" ").append(op).append(" ").append(limit).append("` to `").append(var).append(" ").append(correctOp).append(" ").append(limit).append("` (from ").append(start).append(" down to ").append(limit).append("). ");
-            }
-            if (fixed.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*")) {
-                fixed = fixed.replaceAll("(?m)^(\\s*)" + var + "\\s*\\+=\\s*(\\d+)", "$1" + var + " -= $2");
-                expl.append("Corrected loop step direction to decrement (`").append(var).append(" -= 1`). ");
-            } else if (!fixed.matches("(?s).*\\b" + var + "\\s*(-=|=).*")) {
-                fixed = appendStep(fixed, var, "-= 1");
-                expl.append("Added loop decrement (`").append(var).append(" -= 1`) so loop terminates properly. ");
-            }
-        }
-
-        if (expl.length() > 0) {
-            return new FixResult(expl.toString().trim(), fixed, List.of(), "HIGH", List.of());
-        }
-        return null;
+        return CodeLogicAnalyzer.analyzeAndFixLoop(code);
     }
 
     public static boolean isLoopLogicInverted(String original, String fix) {
-        if (original == null || fix == null) return false;
-        java.util.regex.Matcher mOrig = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(original);
-        java.util.regex.Matcher mFix = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(fix);
-        if (mOrig.find() && mFix.find()) {
-            int origStart = Integer.parseInt(mOrig.group(3));
-            int origLimit = Integer.parseInt(mOrig.group(5));
-            int fixLimit = Integer.parseInt(mFix.group(5));
-            // If original was counting up (start < limit), but fix changed limit or turned it into a countdown to 0:
-            if (origStart < origLimit && origLimit > 0 && fixLimit <= 0) {
-                return true;
-            }
-        }
-        return false;
+        return CodeLogicAnalyzer.isLoopLogicInverted(original, fix);
     }
 
     public static boolean isDeadCodeOrInfiniteLoop(String code) {
-        if (code == null) return false;
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(code);
-        if (m.find()) {
-            int start = Integer.parseInt(m.group(3));
-            String op = m.group(4);
-            int limit = Integer.parseInt(m.group(5));
-            String var = m.group(2);
-            // Dead code checks
-            if (op.equals("<") && start >= limit) return true;
-            if (op.equals("<=") && start > limit) return true;
-            if (op.equals(">") && start <= limit) return true;
-            if (op.equals(">=") && start < limit) return true;
-            // Infinite loop checks
-            if (start < limit && code.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*")) return true;
-            if (start > limit && code.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*")) return true;
-        }
-        return false;
+        return CodeLogicAnalyzer.isDeadCodeOrInfiniteLoop(code);
     }
 
     public static boolean isLoopLogicallyValid(String code) {
-        if (code == null) return true;
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?s)^(\\s*)([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*(-?\\d+).*?while\\s*\\(?\\s*\\2\\s*(<=?|>=?)\\s*(-?\\d+)").matcher(code);
-        if (m.find()) {
-            int start = Integer.parseInt(m.group(3));
-            String op = m.group(4);
-            int limit = Integer.parseInt(m.group(5));
-            String var = m.group(2);
+        return CodeLogicAnalyzer.isLoopLogicallyValid(code);
+    }
 
-            if (start < limit) {
-                boolean validCondition = op.equals("<") || op.equals("<=");
-                boolean validStep = code.matches("(?s).*\\b" + var + "\\s*\\+=\\s*\\d+.*") ||
-                                    code.matches("(?s).*\\b" + var + "\\s*=\\s*" + var + "\\s*\\+\\s*\\d+.*");
-                return validCondition && validStep;
-            }
-
-            if (start > limit) {
-                boolean validCondition = op.equals(">") || op.equals(">=");
-                boolean validStep = code.matches("(?s).*\\b" + var + "\\s*-=\\s*\\d+.*") ||
-                                    code.matches("(?s).*\\b" + var + "\\s*=\\s*" + var + "\\s*-\\s*\\d+.*");
-                return validCondition && validStep;
-            }
-
-            return false;
-        }
-        return true;
+    public static String fixYodaConditionOnly(String code, String[] loopInfo) {
+        return CodeLogicAnalyzer.fixYodaConditionOnly(code, loopInfo);
     }
 
     public static String fallbackPythonFix(String originalContent) {
-        if (originalContent == null) return "";
-        FixResult smartFix = analyzeAndFixLoop(originalContent);
-        if (smartFix != null && smartFix.fixCode() != null) {
-            return smartFix.fixCode();
-        }
-        return originalContent;
+        return CodeLogicAnalyzer.fallbackPythonFix(originalContent);
     }
 
     public FixResult fixWholeFile(String language, String filePath, String fileContent, List<Issue> issues) {
@@ -320,7 +192,7 @@ public class OllamaAnalysisEnricher {
         // INTELLIGENT GUARD: If user's code is already 100% syntactically & logically valid, DO NOT MUTATE IT!
         boolean hasIssues = issues != null && !issues.isEmpty();
         boolean hasUndefinedVar = fileContent != null && fileContent.contains("print(j)") && !fileContent.contains("j =");
-        if (!hasIssues && !hasUndefinedVar && isLoopLogicallyValid(fileContent)) {
+        if (!hasIssues && !hasUndefinedVar && CodeLogicAnalyzer.isLoopLogicallyValid(fileContent)) {
             log.info("Original file code is already 100% syntactically and logically valid. Preserving without changes.");
             return new FixResult("Code is already correct — no changes needed.", fileContent, List.of(), "HIGH", List.of());
         }
@@ -349,7 +221,7 @@ public class OllamaAnalysisEnricher {
             if (retryResult != null && retryResult.fixCode() != null && !isCrossLanguageContaminated(retryResult.fixCode(), normLang)) {
                 result = retryResult;
             } else if ("python".equals(normLang)) {
-                String safePy = fallbackPythonFix(fileContent);
+                String safePy = CodeLogicAnalyzer.fallbackPythonFix(fileContent);
                 log.info("Cross-language contamination persisted; applying deterministic pure Python logic fix.");
                 return new FixResult("Fixed undefined variable name and ensured loop termination.", safePy, List.of(), "HIGH", List.of());
             }
@@ -367,34 +239,48 @@ public class OllamaAnalysisEnricher {
             }
 
             // Post-processing guard: replace lazy 'pass' in loops with meaningful logic using the loop variable
-            if (fixCode != null && "python".equalsIgnoreCase(normLang)) {
-                String enhanced = fixCode.replaceAll("(?m)^(\\s*)for\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+in\\s+([^:]+):\\s*\\n\\1(\\s+)pass\\b", "$1for $2 in $3:\n$1$4print($2)");
-                if (!enhanced.equals(fixCode)) {
-                    log.info("Replaced lazy 'pass' loop placeholder with meaningful loop logic print(var)");
-                    String explanation = result.explanation() != null
-                        ? result.explanation().replace("placeholder `pass`", "loop execution logic").replace("`pass`", "meaningful logic")
-                        : "Fixed loop syntax and implemented meaningful execution logic";
-                    return new FixResult(explanation, enhanced, result.affectedFiles(), result.confidence(), result.errorsFound());
+            if (fixCode != null) {
+                if ("python".equalsIgnoreCase(normLang)) {
+                    String enhanced = fixCode.replaceAll("(?m)^(\\s*)for\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+in\\s+([^:]+):\\s*\\n\\1(\\s+)pass\\b", "$1for $2 in $3:\n$1$4print($2)");
+                    if (!enhanced.equals(fixCode)) {
+                        log.info("Replaced lazy 'pass' loop placeholder with meaningful loop logic print(var)");
+                        fixCode = enhanced;
+                    }
                 }
 
-                // If fixCode is dead code or has an infinite loop, or if original had an unaddressed loop error:
-                if (isDeadCodeOrInfiniteLoop(fixCode)) {
-                    FixResult loopFix = analyzeAndFixLoop(fixCode);
+                // CRITICAL GUARD: Detect when LLM changed comparison values while "fixing" conditions across ANY language.
+                // E.g., original: "while 1 < a:" (means a > 1), LLM changed to "while a > 0:" (WRONG! changed 1 to 0)
+                if (CodeLogicAnalyzer.isLoopLogicInverted(fileContent, fixCode)) {
+                    log.info("LLM changed loop comparison values! Preserving original semantics.");
+                    String[] origInfo = CodeLogicAnalyzer.extractWhileLoopInfo(fileContent);
+                    if (origInfo != null) {
+                        boolean origIsYoda = "true".equals(origInfo[4]);
+                        if (origIsYoda && !CodeLogicAnalyzer.isDeadCodeOrInfiniteLoop(fileContent)) {
+                            String safeFixed = CodeLogicAnalyzer.fixYodaConditionOnly(fileContent, origInfo);
+                            String safeExpl = result.explanation() != null ? result.explanation() : "Fixed Yoda condition style.";
+                            return new FixResult(safeExpl, safeFixed, List.of(), "HIGH", List.of());
+                        }
+                    }
+                    FixResult loopFix = CodeLogicAnalyzer.analyzeAndFixLoop(fileContent);
+                    if (loopFix != null) {
+                        log.info("Restored non-inverted loop intent from original file: {}", loopFix.explanation());
+                        return loopFix;
+                    }
+                    return new FixResult("Code is already correct — no changes needed.", fileContent, List.of(), "HIGH", List.of());
+                }
+
+                // If fixCode is dead code or has an infinite loop:
+                if (CodeLogicAnalyzer.isDeadCodeOrInfiniteLoop(fixCode)) {
+                    FixResult loopFix = CodeLogicAnalyzer.analyzeAndFixLoop(fixCode);
                     if (loopFix == null) {
-                        loopFix = analyzeAndFixLoop(fileContent);
+                        loopFix = CodeLogicAnalyzer.analyzeAndFixLoop(fileContent);
                     }
                     if (loopFix != null) {
                         log.info("Fixed dead code/infinite loop in AI result: {}", loopFix.explanation());
                         return loopFix;
                     }
-                } else if (isLoopLogicInverted(fileContent, fixCode)) {
-                    FixResult loopFix = analyzeAndFixLoop(fileContent);
-                    if (loopFix != null) {
-                        log.info("Restored non-inverted loop intent from original file: {}", loopFix.explanation());
-                        return loopFix;
-                    }
-                } else if (isDeadCodeOrInfiniteLoop(fileContent) && fixCode.trim().equals(fileContent.trim())) {
-                    FixResult loopFix = analyzeAndFixLoop(fileContent);
+                } else if (CodeLogicAnalyzer.isDeadCodeOrInfiniteLoop(fileContent) && fixCode.trim().equals(fileContent.trim())) {
+                    FixResult loopFix = CodeLogicAnalyzer.analyzeAndFixLoop(fileContent);
                     if (loopFix != null) {
                         log.info("Fixed unaddressed loop error from original file: {}", loopFix.explanation());
                         return loopFix;

@@ -3,6 +3,7 @@
   "displayName": "SeniorDev AI",
   "description": "AI-powered Senior Developer Assistant for static analysis and whole-file auto-fixes",
   "version": "0.3.0",
+  "icon": "",
   "publisher": "seniordev",
   "engines": {
     "vscode": "^1.85.0"
@@ -74,7 +75,7 @@
         {
           "id": "seniordev-sidebar",
           "title": "SeniorDev AI",
-          "icon": "$(shield)"
+          "icon": "media/sidebar-icon.svg"
         }
       ]
     },
